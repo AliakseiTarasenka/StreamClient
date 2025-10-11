@@ -15,3 +15,11 @@ dependencies = [
     "urllib3>=2.5.0",
     "websockets>=15.0.1",
 ]
+
+[dependency-groups]
+dev = [
+    "black>=25.9.0",
+    "pylint>=3.3.9",
+    "pytest>=8.4.2",
+    "pytest-cov>=7.0.0",
+]
