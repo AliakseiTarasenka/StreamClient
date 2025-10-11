@@ -4,4 +4,14 @@ version = "0.1.0"
 description = "client is used for interactive communication session during the livestream event"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "aiofiles>=25.1.0",
+    "black>=25.9.0",
+    "httpx>=0.28.1",
+    "pydantic-settings>=2.11.0",
+    "pylint>=3.3.9",
+    "pytest>=8.4.2",
+    "pytest-cov>=7.0.0",
+    "urllib3>=2.5.0",
+    "websockets>=15.0.1",
+]
