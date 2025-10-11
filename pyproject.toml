@@ -1,0 +1,7 @@
+[project]
+name = "streamclient"
+version = "0.1.0"
+description = "client is used for interactive communication session during the livestream event"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
