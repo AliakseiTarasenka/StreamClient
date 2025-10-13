@@ -9,6 +9,7 @@ WebSocket client used for interactive communication sessions during livestream e
 4. [Running the Application](#running-the-application)
 5. [Running Tests](#running-tests)
 6. [Contributing](#contributing)
+6. [Diagram](#relationship-diagram)
 
 ---
 
@@ -55,3 +56,8 @@ Install `uv` if you don’t have it:
     ```bash
     make test
     ```
+
+### Relationship Diagrams:
+
+1.  Teams, Players, Divisions
+    https://dbdiagram.io/d/68e68028d2b621e422e49c03
