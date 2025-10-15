@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional
-from domain.models.game_event import GameEvent
-from domain.models.player import Player
+from src.domain.models.game_event import GameEvent
 
 
 @dataclass
