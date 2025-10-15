@@ -9,10 +9,10 @@ class GameEvent:
     event_time: int
     team: str
     event_type: str
-    assist: Optional[str] = None
-    scorer: Optional[str] = None
-    home_score: Optional[str] = None
-    away_score: Optional[str] = None
+    assist: str = ""
+    scorer: str = ""
+    home_score: str = ""
+    away_score: str = ""
 
     def __str__(self):
         details = f"{self.event_time}s {self.team.upper()} {self.event_type}"
