@@ -68,12 +68,12 @@ Examples:
             raise
 
     async def _handle_schedule_query(self, date: str):
-        print(f"Fetching schedule for {date} :")
+        print(f"Fetching schedule for {date}:")
         result = await self.game_service.get_game_schedule(date)
         print(result)
 
     async def _handle_game_query(self, game_id: int):
-        print(f"Fetching game {game_id} :")
+        print(f"Fetching game {game_id}:")
         result = await self.game_service.get_game_events_with_persistence(game_id)
         print(result)
 

@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 from typing import Optional
+from domain.models.game_event import GameEvent
+from domain.models.player import Player
 
 
 @dataclass
@@ -18,7 +20,7 @@ class GameState:
     away_team_abbr: str = ""
     home_players: dict = None
     away_players: dict = None
-    events: list = None
+    events: list[GameEvent] = None
     latest_scorer: str = ""
     latest_assist: str = ""
 
@@ -53,3 +55,15 @@ class GameState:
             "latest_scorer": self.latest_scorer,
             "latest_assist": self.latest_assist,
         }
+
+    def __str__(self):
+        if self.events:
+            events_str = "\n".join(str(event) for event in self.events)
+        else:
+            events_str = "No events recorded."
+
+        return (
+            f"{self.home_team_name} ({self.home_team_abbr}) - {self.home_score}\n"
+            f"{self.away_team_name} ({self.away_team_abbr}) - {self.away_score}\n\n"
+            f"--- Game Events ---\n{events_str}"
+        )

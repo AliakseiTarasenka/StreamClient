@@ -57,7 +57,7 @@ class ProcessGameEventsWithPersistence(Command):
         # Persist game state
         await self._persist_game_state(game_state)
 
-        return str(game_state.to_dict())
+        return str(game_state)
 
     async def _persist_game_state(self, game_state: GameState) -> None:
         """Persist game state to files"""
