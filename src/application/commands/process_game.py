@@ -77,26 +77,3 @@ class ProcessGameEventsWithPersistence(Command):
         await self.file_manager.write_text("away_score.txt", away_score)
         await self.file_manager.write_text("scorer.txt", scorer)
         await self.file_manager.write_text("assist.txt", assist)
-
-
-class CommandFactory:
-    """Factory for creating commands"""
-
-    def __init__(self, api_client: APIClientPool, file_manager: AsyncFileManager):
-        self.api_client = api_client
-        self.file_manager = file_manager
-
-    def create_command(self, command_type: str) -> Command:
-        """Create command based on type"""
-        commands = {
-            "game_schedule": lambda: ProcessGameSchedule(self.api_client),
-            "game_events": lambda: ProcessGameEvents(self.api_client),
-            "game_events_persist": lambda: ProcessGameEventsWithPersistence(
-                self.api_client, self.file_manager
-            ),
-        }
-
-        if command_type not in commands:
-            raise ValueError(f"Invalid command type. Available: {', '.join(commands.keys())}")
-
-        return commands[command_type]()

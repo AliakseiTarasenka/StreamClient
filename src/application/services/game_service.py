@@ -31,7 +31,7 @@ class GameService:
 
     async def get_game_schedule(self, date: str) -> str:
         """Get game schedule for a specific date"""
-        from src.application.commands.factory import ProcessGameSchedule
+        from src.application.commands.process_game import ProcessGameSchedule
 
         command = ProcessGameSchedule(self.api_client)
         data = {"schedule": date, "date": date}
@@ -39,7 +39,7 @@ class GameService:
 
     async def get_game_events(self, game_id: int) -> GameState:
         """Get game events for a specific game"""
-        from src.application.commands.factory import ProcessGameEvents
+        from src.application.commands.process_game import ProcessGameEvents
 
         command = ProcessGameEvents(self.api_client)
         data = {"game": game_id, "update": "true", "players": "true", "teams": "true"}
@@ -47,7 +47,7 @@ class GameService:
 
     async def get_game_events_with_persistence(self, game_id: int) -> str:
         """Get game events and persist to files"""
-        from src.application.commands.factory import ProcessGameEventsWithPersistence
+        from src.application.commands.process_game import ProcessGameEventsWithPersistence
 
         command = ProcessGameEventsWithPersistence(self.api_client, self.file_writer)
         data = {"game": game_id, "update": "true", "players": "true", "teams": "true"}

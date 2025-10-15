@@ -1,9 +1,7 @@
 import argparse
 import asyncio
-import json
 from src.application.services.game_service import GameService
 from src.application.services.game_clock_service import GameClockService
-from src.application.commands.factory import CommandFactory
 from config.settings import Settings
 
 
@@ -11,10 +9,9 @@ class CLIHandler:
     """Handles CLI argument parsing and execution"""
 
     def __init__(
-        self, game_service: GameService, command_factory: CommandFactory, settings: Settings
+        self, game_service: GameService, settings: Settings
     ):
         self.game_service = game_service
-        self.command_factory = command_factory
         self.settings = settings
 
     @staticmethod

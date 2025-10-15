@@ -5,7 +5,6 @@ from src.infrastructure.persistence.async_file_manager import AsyncFileManager
 from src.infrastructure.websocket.server import WebSocketGameServer
 from src.infrastructure.websocket.streamer import GameEventStreamer
 from src.application.services.game_service import GameService
-from src.application.commands.factory import CommandFactory
 from src.presentation.cli import CLIHandler
 from config.settings import Settings
 
@@ -42,13 +41,8 @@ async def main():
         event_streamer=event_streamer,
     )
 
-    # Initialize command factory
-    command_factory = CommandFactory(api_client=api_client, file_manager=file_manager)
-
     # Handle CLI
-    cli_handler = CLIHandler(
-        game_service=game_service, command_factory=command_factory, settings=settings
-    )
+    cli_handler = CLIHandler(game_service=game_service, settings=settings)
 
     try:
         await cli_handler.handle()
