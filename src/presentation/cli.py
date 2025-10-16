@@ -76,18 +76,19 @@ Examples:
 
     async def _handle_start_mode(self, game_id: int, duration: int):
         """Start WebSocket + game monitoring + clock"""
+        clock_service = GameClockService(self.game_service, self.game_service.file_writer)
+        monitor_task = asyncio.create_task(self.game_service.start_game_monitoring(game_id))
+        clock_task = asyncio.create_task(clock_service.start(game_id, duration))
+        tasks = [monitor_task, clock_task]
         if not self.game_service.ws_server or not self.game_service.event_streamer:
             print("WebSocket support not enabled. Set ENABLE_WEBSOCKET=true in .env")
-            return
-
+        else:
+            # we are running tasks concurrently: clock, writing to a file and using websocket
+            ws_task = asyncio.create_task(self.game_service.ws_server.start())
+            tasks.append(ws_task)
         print(f"Starting game {game_id} with {duration} minute clock...")
-        # we are running tasks concurrently: clock, writing to a file and using websocket
-        ws_task = asyncio.create_task(self.game_service.ws_server.start())
-        monitor_task = asyncio.create_task(self.game_service.start_game_monitoring(game_id))
-        clock_service = GameClockService(self.game_service, self.game_service.file_writer)
-        clock_task = asyncio.create_task(clock_service.start(game_id, duration))
         try:
-            await asyncio.gather(ws_task, monitor_task, clock_task)
+            await asyncio.gather(*tasks)
         except KeyboardInterrupt:
             print("\nStopping all services...")
         finally:
