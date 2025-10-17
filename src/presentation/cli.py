@@ -8,9 +8,7 @@ from config.settings import Settings
 class CLIHandler:
     """Handles CLI argument parsing and execution"""
 
-    def __init__(
-        self, game_service: GameService, settings: Settings
-    ):
+    def __init__(self, game_service: GameService, settings: Settings):
         self.game_service = game_service
         self.settings = settings
 
