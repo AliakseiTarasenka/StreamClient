@@ -45,15 +45,22 @@ class WebSocketGameServer:
         else:
             await websocket.send(json.dumps({"error": "Unknown action"}))
 
-    async def broadcast(self, message: dict):
-        """Send a message to all connected clients."""
+    async def broadcast_game_update(self, game_id: int, current_state: dict):
         if not self._clients:
             return
+
+        message = {
+            "type": "game_update",
+            "game_id": game_id,
+            "payload": current_state,
+        }
+
         message_str = json.dumps(message)
         await asyncio.gather(
             *(client.send(message_str) for client in self._clients if client.open),
             return_exceptions=True,
         )
+        print(f"[WS] Broadcasted game {game_id} update to {len(self._clients)} clients")
 
     async def start(self):
         """Start the WebSocket server."""
