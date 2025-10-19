@@ -75,22 +75,45 @@ Examples:
     async def _handle_start_mode(self, game_id: int, duration: int):
         """Start WebSocket + game monitoring + clock"""
         clock_service = GameClockService(self.game_service, self.game_service.file_writer)
-        monitor_task = asyncio.create_task(self.game_service.start_game_monitoring(game_id))
+        tasks = []
+
+        # Clock task
         clock_task = asyncio.create_task(clock_service.start(game_id, duration))
-        tasks = [monitor_task, clock_task]
+        tasks.append(clock_task)
+
+        # Initialize optional tasks
+        ws_task = None
+        monitor_task = None
+
         if not self.game_service.ws_server or not self.game_service.event_streamer:
             print("WebSocket support not enabled. Set ENABLE_WEBSOCKET=true in .env")
         else:
-            # we are running tasks concurrently: clock, writing to a file and using websocket
+            monitor_task = asyncio.create_task(self.game_service.start_game_monitoring(game_id))
             ws_task = asyncio.create_task(self.game_service.ws_server.start())
-            tasks.append(ws_task)
-        print(f"Starting game {game_id} with {duration} minute clock...")
+            tasks.extend([monitor_task, ws_task])
+
+        print(f"Starting game {game_id} with {duration}-minute clock...")
+
         try:
-            await asyncio.gather(*tasks)
+            # Run all tasks concurrently; exceptions are captured individually
+            await asyncio.gather(*tasks, return_exceptions=True)
         except KeyboardInterrupt:
-            print("\nStopping all services...")
+            print("\nKeyboardInterrupt received. Stopping all services...")
         finally:
-            await self.game_service.stop_game_monitoring(game_id)
-            await self.game_service.ws_server.stop()
+            # Cancel all running tasks safely
+            for task in tasks:
+                if task and not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+
+            # Call explicit stop methods for services
+            if monitor_task:
+                await self.game_service.stop_game_monitoring(game_id)
+            if ws_task:
+                await self.game_service.ws_server.stop()
             await clock_service.stop()
+
             print("Shutdown complete.")

@@ -47,7 +47,7 @@ Install `uv` if you don’t have it:
     ```
 4. Activate the virtual environment:
     ```bash
-    uv shell
+    source .venv/bin/activate
     ```
    
 ### Running tests
