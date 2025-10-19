@@ -5,29 +5,17 @@ High-level game service orchestrating business logic
 import asyncio
 import math
 import time
-from typing import Optional
-
 from src.infrastructure.api.client import APIClientPool
 from src.infrastructure.persistence.async_file_manager import AsyncFileManager
-from src.infrastructure.websocket.server import WebSocketGameServer
-from src.infrastructure.websocket.streamer import GameEventStreamer
 from src.domain.models.game_state import GameState
 
 
 class GameService:
     """High-level service for game operations"""
 
-    def __init__(
-        self,
-        api_client: APIClientPool,
-        file_manager: AsyncFileManager,
-        ws_server: Optional[WebSocketGameServer] = None,
-        event_streamer: Optional[GameEventStreamer] = None,
-    ):
+    def __init__(self, api_client: APIClientPool, file_manager: AsyncFileManager):
         self.api_client = api_client
         self.file_writer = file_manager
-        self.ws_server = ws_server
-        self.event_streamer = event_streamer
 
     async def get_game_schedule(self, date: str) -> str:
         """Get game schedule for a specific date"""
@@ -45,27 +33,13 @@ class GameService:
         data = {"game": game_id, "update": "true", "players": "true", "teams": "true"}
         return await command.execute(data)
 
-    async def get_game_events_with_persistence(self, game_id: int) -> str:
+    async def get_game_events_with_persistence(self, game_id: int) -> GameState:
         """Get game events and persist to files"""
         from src.application.commands.process_game import ProcessGameEventsWithPersistence
 
         command = ProcessGameEventsWithPersistence(self.api_client, self.file_writer)
         data = {"game": game_id, "update": "true", "players": "true", "teams": "true"}
         return await command.execute(data)
-
-    async def start_game_monitoring(self, game_id: int):
-        """Start real-time monitoring of a game via WebSocket"""
-        if not self.ws_server or not self.event_streamer:
-            raise RuntimeError("WebSocket support not enabled")
-
-        await self.event_streamer.start_monitoring(game_id)
-
-    async def stop_game_monitoring(self, game_id: int):
-        """Stop real-time monitoring of a game"""
-        if not self.event_streamer:
-            raise RuntimeError("WebSocket support not enabled")
-
-        await self.event_streamer.stop_monitoring(game_id)
 
     async def run_game_clock(self, game_id: int, duration_minutes: int):
         """Run game clock with countdown and file updates"""
@@ -104,9 +78,6 @@ class GameService:
                     # Trigger event checking every 5 seconds
                     if not events_request_sent and now % 5 == 0:
                         events_request_sent = True
-
-                        # Fetch and persist game state
-                        await self.get_game_events_with_persistence(game_id)
 
                         # Update clock state from API
                         game_state = await self.get_game_events(game_id)

@@ -49,7 +49,7 @@ class ProcessGameEventsWithPersistence(Command):
         self.file_manager = file_manager
         self.extractor = GameDataExtractor()
 
-    async def execute(self, data: Dict[str, Any]) -> str:
+    async def execute(self, data: Dict[str, Any]) -> GameState:
         """Execute game events retrieval and persist to files"""
         response = await self.api_client.post(data, use_cache=True)
         game_state = GameEventParser.parse_event_data(response)
@@ -57,7 +57,7 @@ class ProcessGameEventsWithPersistence(Command):
         # Persist game state
         await self._persist_game_state(game_state)
 
-        return str(game_state)
+        return game_state
 
     async def _persist_game_state(self, game_state: GameState) -> None:
         """Persist game state to files"""

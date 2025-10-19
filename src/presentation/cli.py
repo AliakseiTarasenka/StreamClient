@@ -2,14 +2,19 @@ import argparse
 import asyncio
 from src.application.services.game_service import GameService
 from src.application.services.game_clock_service import GameClockService
+from src.infrastructure.websocket.server import WebSocketGameServer
+from src.infrastructure.websocket.streamer import GameEventStreamer
 from config.settings import Settings
 
 
 class CLIHandler:
     """Handles CLI argument parsing and execution"""
 
-    def __init__(self, game_service: GameService, settings: Settings):
+    def __init__(
+        self, game_service: GameService, ws_server: WebSocketGameServer, settings: Settings
+    ):
         self.game_service = game_service
+        self.ws_server = ws_server
         self.settings = settings
 
     @staticmethod
@@ -70,7 +75,7 @@ Examples:
     async def _handle_game_query(self, game_id: int):
         print(f"Fetching game {game_id}:")
         result = await self.game_service.get_game_events_with_persistence(game_id)
-        print(result)
+        print(str(result))
 
     async def _handle_start_mode(self, game_id: int, duration: int):
         """Start WebSocket + game monitoring + clock"""
@@ -79,19 +84,21 @@ Examples:
 
         # Clock task
         clock_task = asyncio.create_task(clock_service.start(game_id, duration))
-        tasks.append(clock_task)
 
         # Initialize optional tasks
         ws_task = None
-        monitor_task = None
 
-        if not self.game_service.ws_server or not self.game_service.event_streamer:
+        if not self.ws_server:
             print("WebSocket support not enabled. Set ENABLE_WEBSOCKET=true in .env")
         else:
-            monitor_task = asyncio.create_task(self.game_service.start_game_monitoring(game_id))
-            ws_task = asyncio.create_task(self.game_service.ws_server.start())
-            tasks.extend([monitor_task, ws_task])
+            ws_task = asyncio.create_task(self.ws_server.start())
+            tasks.append(ws_task)
 
+        stream = GameEventStreamer(
+            self.game_service, self.settings.polling_interval, self.ws_server
+        )
+        monitor_task = asyncio.create_task(stream.start_monitoring(game_id))
+        tasks.extend([monitor_task, clock_task])
         print(f"Starting game {game_id} with {duration}-minute clock...")
 
         try:
@@ -110,10 +117,10 @@ Examples:
                         pass
 
             # Call explicit stop methods for services
-            if monitor_task:
-                await self.game_service.stop_game_monitoring(game_id)
+            if monitor_task and stream:
+                await stream.stop_monitoring(game_id)
             if ws_task:
-                await self.game_service.ws_server.stop()
+                await self.ws_server.stop()
             await clock_service.stop()
 
             print("Shutdown complete.")
