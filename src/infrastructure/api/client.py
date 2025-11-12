@@ -53,7 +53,7 @@ class APIClient:
         self.base_url = base_url or config.api_default_url
         self.headers = headers or config.default_headers
 
-        # init async httpx client
+        # init NON-BLOCKING async HTTP client
         self._client = httpx.AsyncClient(
             verify=False,
             limits=httpx.Limits(max_connections=max_connections, max_keepalive_connections=20),
