@@ -95,7 +95,7 @@ Examples:
             tasks.append(ws_task)
 
         stream = GameEventStreamer(
-            self.game_service, self.settings.polling_interval, self.ws_server
+            self.game_service, self.settings.poll_interval, self.ws_server
         )
         monitor_task = asyncio.create_task(stream.start_monitoring(game_id))
         tasks.extend([monitor_task, clock_task])

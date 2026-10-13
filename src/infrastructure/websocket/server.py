@@ -1,8 +1,8 @@
 import asyncio
 import json
 import signal
-import websockets
-from websockets.server import WebSocketServerProtocol
+from websockets.asyncio.server import ServerConnection, serve
+from websockets.exceptions import ConnectionClosed
 
 
 class WebSocketGameServer:
@@ -13,10 +13,10 @@ class WebSocketGameServer:
         self.port = port
         self._running = False
         self._server = None
-        self._clients: set[WebSocketServerProtocol] = set()
+        self._clients: set[ServerConnection] = set()
         self._shutdown_event = asyncio.Event()
 
-    async def handle_client(self, websocket: WebSocketServerProtocol):
+    async def handle_client(self, websocket: ServerConnection):
         """Handle new WebSocket client connections."""
         self._clients.add(websocket)
         client_addr = websocket.remote_address
@@ -24,12 +24,13 @@ class WebSocketGameServer:
         try:
             async for message in websocket:
                 await self.handle_message(websocket, message)
-        except websockets.ConnectionClosed:
+        except ConnectionClosed:
             print(f"[WS] Client disconnected: {client_addr}")
         finally:
-            self._clients.remove(websocket)
+            self._clients.discard(websocket)
 
-    async def handle_message(self, websocket: WebSocketServerProtocol, message: str):
+    @staticmethod
+    async def handle_message(websocket: ServerConnection, message: str):
         """Handle incoming message from a client."""
         try:
             data = json.loads(message)
@@ -56,15 +57,24 @@ class WebSocketGameServer:
         }
 
         message_str = json.dumps(message)
-        await asyncio.gather(
-            *(client.send(message_str) for client in self._clients if client.open),
+        clients = tuple(self._clients)
+        results = await asyncio.gather(
+            *(client.send(message_str) for client in clients),
             return_exceptions=True,
         )
-        print(f"[WS] Broadcasted game {game_id} update to {len(self._clients)} clients")
+        sent_count = 0
+        for client, result in zip(clients, results):
+            if isinstance(result, ConnectionClosed):
+                self._clients.discard(client)
+            elif isinstance(result, BaseException):
+                raise result
+            else:
+                sent_count += 1
+        print(f"[WS] Broadcasted game {game_id} update to {sent_count} clients")
 
     async def start(self):
         """Start the WebSocket server."""
-        self._server = await websockets.serve(self.handle_client, self.host, self.port)
+        self._server = await serve(self.handle_client, self.host, self.port)
         self._running = True
         print(f"[WS] Server started on ws://{self.host}:{self.port}")
 
