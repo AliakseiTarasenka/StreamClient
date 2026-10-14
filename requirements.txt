@@ -15,9 +15,10 @@ idna==3.10
 iniconfig==2.1.0
 isort==6.1.0
 mccabe==0.7.0
+mypy==2.4.0
 mypy-extensions==1.1.0
 packaging==25.0
-pathspec==0.12.1
+pathspec==1.1.1
 platformdirs==4.5.0
 pluggy==1.6.0
 pre-commit==4.7.0

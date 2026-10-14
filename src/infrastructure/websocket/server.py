@@ -30,7 +30,7 @@ class WebSocketGameServer:
             self._clients.discard(websocket)
 
     @staticmethod
-    async def handle_message(websocket: ServerConnection, message: str):
+    async def handle_message(websocket: ServerConnection, message: str | bytes):
         """Handle incoming message from a client."""
         try:
             data = json.loads(message)

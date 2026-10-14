@@ -8,8 +8,8 @@ class GameEvent:
     event_time: int
     team: str
     event_type: str
-    assist: str = ""
-    scorer: str = ""
+    assist: str | None = ""
+    scorer: str | None = ""
     home_score: str = ""
     away_score: str = ""
 
