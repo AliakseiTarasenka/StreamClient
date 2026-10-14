@@ -46,4 +46,3 @@ class AsyncFileManager:
         filepath = self._get_full_path(filename)
         if filepath.exists():
             filepath.unlink()
-

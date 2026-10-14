@@ -81,27 +81,26 @@ Examples:
         """Start WebSocket + game monitoring + clock"""
         clock_service = GameClockService(self.game_service, self.game_service.file_writer)
         tasks = []
-
-        # Clock task
-        clock_task = asyncio.create_task(clock_service.start(game_id, duration))
-
-        # Initialize optional tasks
         ws_task = None
-
-        if not self.ws_server:
-            print("WebSocket support not enabled. Set ENABLE_WEBSOCKET=true in .env")
-        else:
-            ws_task = asyncio.create_task(self.ws_server.start())
-            tasks.append(ws_task)
-
-        stream = GameEventStreamer(
-            self.game_service, self.settings.poll_interval, self.ws_server
-        )
-        monitor_task = asyncio.create_task(stream.start_monitoring(game_id))
-        tasks.extend([monitor_task, clock_task])
-        print(f"Starting game {game_id} with {duration}-minute clock...")
+        stream = None
 
         try:
+            clock_task = asyncio.create_task(clock_service.start(game_id, duration))
+            tasks.append(clock_task)
+
+            if not self.ws_server:
+                print("WebSocket support not enabled. Set ENABLE_WEBSOCKET=true in .env")
+            else:
+                ws_task = asyncio.create_task(self.ws_server.start())
+                tasks.append(ws_task)
+
+            stream = GameEventStreamer(
+                self.game_service, self.settings.poll_interval, self.ws_server
+            )
+            monitor_task = asyncio.create_task(stream.start_monitoring(game_id))
+            tasks.append(monitor_task)
+            print(f"Starting game {game_id} with {duration}-minute clock...")
+
             # Run all tasks concurrently; exceptions are captured individually
             await asyncio.gather(*tasks, return_exceptions=True)
         except KeyboardInterrupt:
@@ -109,17 +108,14 @@ Examples:
         finally:
             # Cancel all running tasks safely
             for task in tasks:
-                if task and not task.done():
+                if not task.done():
                     task.cancel()
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        pass
+            await asyncio.gather(*tasks, return_exceptions=True)
 
             # Call explicit stop methods for services
-            if monitor_task and stream:
+            if stream is not None:
                 await stream.stop_monitoring(game_id)
-            if ws_task:
+            if ws_task is not None:
                 await self.ws_server.stop()
             await clock_service.stop()
 

@@ -6,7 +6,7 @@ The application uses asyncio, HTTPX, Pydantic Settings, aiofiles, and websockets
 
 ## Current status
 
-Schedule retrieval and a single game query are implemented. Parsing and file output were checked with a synthetic API response during the project review. The WebSocket connection API defect (R3) is fixed and covered by loopback tests. Other live-mode findings remain in the [review report](docs/review.md), including task lifecycle and scoring-event serialization.
+Schedule retrieval and a single game query are implemented. Parsing and file output were checked with a synthetic API response during the project review. Live startup cleanup (R1) and the WebSocket connection API defect (R3) are fixed and covered by regression tests. Other live-mode findings remain in the [review report](docs/review.md), including long-running task supervision and scoring-event serialization.
 
 ## Setup
 
@@ -61,7 +61,7 @@ Replace the example date and game ID with values for your event. A schedule quer
 python main.py --game 12345 --start
 ```
 
-Set `ENABLE_WEBSOCKET=true` to request a WebSocket server at `ws://localhost:8765`. The working tree already corrects the polling setting name (R1), and the connection API fix (R3) supports broadcast delivery. Live-task lifecycle and scoring-event serialization still need the fixes described in the [review report](docs/review.md).
+Set `ENABLE_WEBSOCKET=true` to request a WebSocket server at `ws://localhost:8765`. The CLI uses the declared polling setting and cleans up tasks if initialization fails (R1); the connection API fix (R3) supports broadcast delivery. Long-running task supervision and scoring-event serialization still need the fixes described in the [review report](docs/review.md).
 
 The example browser UI is [client/ws-client.html](client/ws-client.html). Once the live-mode defects are resolved and the server is running, open it in a browser, enter the monitored game ID, and click **Fetch Game**. The JavaScript connects to a hardcoded `ws://localhost:8765`; entering a game ID sends a subscription acknowledgment request and does not start API monitoring for that game.
 
@@ -86,7 +86,7 @@ A single `--game` query writes ten files, excluding `clock.txt`. WebSocket monit
 python -m pytest tests/ -v --cov=src
 ```
 
-The suite includes three loopback WebSocket regression tests and two original `assert True` placeholders. The regressions cover broadcast delivery, closed connections, and unexpected send failures. Passing the suite does not validate the full live-mode workflow.
+The suite includes three loopback WebSocket tests, four CLI startup/cleanup cases, and two original `assert True` placeholders. The regressions cover broadcasts, closed connections, send errors, initialization failures, and cancellation. Passing the suite does not validate the full live-mode workflow.
 
 - [Architecture and execution flow](docs/architecture.md)
 - [Environment configuration](docs/configuration.md)

@@ -1,7 +1,8 @@
-from pydantic_settings import BaseSettings
-from pathlib import Path
 import json
+from pathlib import Path
 from typing import Dict, Any
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class APIConfig(BaseSettings):
@@ -13,11 +14,12 @@ class APIConfig(BaseSettings):
         '{"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"}'
     )
 
-    class Config:
-        env_file = Path(__file__).resolve().parents[3] / ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
-        extra = "allow"
+    model_config = SettingsConfigDict(
+        env_file=Path(__file__).resolve().parents[3] / ".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="allow",
+    )
 
     @property
     def default_headers(self) -> Dict[str, Any]:
