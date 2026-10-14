@@ -7,6 +7,7 @@ certifi==2025.10.5
 click==8.3.0
 coverage==7.10.7
 dill==0.4.0
+flake8==7.4.1
 h11==0.16.0
 httpcore==1.0.9
 httpx==0.28.1
@@ -19,6 +20,7 @@ packaging==25.0
 pathspec==0.12.1
 platformdirs==4.5.0
 pluggy==1.6.0
+pre-commit==4.7.0
 pydantic==2.12.0
 pydantic-core==2.41.1
 pydantic-settings==2.11.0

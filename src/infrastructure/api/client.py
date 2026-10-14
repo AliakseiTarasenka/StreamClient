@@ -69,7 +69,7 @@ class APIClient:
     async def close(self):
         await self._client.aclose()
 
-    # Async context manager interface implementation : async with APIClient(base_url="...") as client
+    # Support usage such as: async with APIClient(base_url="...") as client.
     async def __aenter__(self):
         return self
 

@@ -1,6 +1,7 @@
-.PHONY: lint test format
+.PHONY: lint test format format-check ci
 
 lint:
+	pre-commit run --all-files --show-diff-on-failure
 	pylint src/ config/ main.py --rcfile=.pylintrc --output-format=colorized --score=yes
 
 test:
@@ -9,7 +10,10 @@ test:
 format:
 	black --line-length 100 src/ tests/ config/ main.py
 
+format-check:
+	black --check --line-length 100 src/ tests/ config/ main.py
+
 ci:
-	$(MAKE) format
+	$(MAKE) format-check
 	$(MAKE) lint
 	$(MAKE) test
