@@ -10,10 +10,10 @@ class GameClockService:
         self.game_service = game_service
         self.file_manager = file_manager
         self._running = False
-        self._task = None
+        self._task: asyncio.Task | None = None
 
-    async def start(self, game_id: int, duration_minutes: int):
-        """Start the game clock"""
+    async def start(self, game_id: int, duration_minutes: int) -> asyncio.Task:
+        """Start the clock and return its running task for supervision."""
         if self._running:
             raise RuntimeError("Game clock already running")
 
@@ -22,6 +22,7 @@ class GameClockService:
             self.game_service.run_game_clock(game_id, duration_minutes)
         )
         print(f"Game clock started for game {game_id}")
+        return self._task
 
     async def stop(self):
         """Stop the game clock"""
@@ -29,12 +30,12 @@ class GameClockService:
             return
 
         self._running = False
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
+        task, self._task = self._task, None
+        if task is not None:
+            if not task.done():
+                task.cancel()
+            # Failures are observed by the supervisor through the returned task.
+            await asyncio.gather(task, return_exceptions=True)
         print("Game clock stopped")
 
     def is_running(self) -> bool:

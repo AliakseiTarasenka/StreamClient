@@ -3,53 +3,70 @@ from src.infrastructure.api.client import APIClientPool
 from src.infrastructure.api.config import APIConfig
 from src.infrastructure.persistence.async_file_manager import AsyncFileManager
 from src.infrastructure.websocket.server import WebSocketGameServer
-from src.infrastructure.websocket.streamer import GameEventStreamer
 from src.application.services.game_service import GameService
+from src.application.services.game_clock_service import GameClockService
+from src.application.services.live_session import LiveGameSession, ServiceLifecycle
+from src.infrastructure.websocket.streamer import GameEventStreamer
 from src.presentation.cli import CLIHandler
 from config.settings import Settings
 
 
+def create_live_session(
+    game_service: GameService,
+    file_manager: AsyncFileManager,
+    poll_interval: int,
+    ws_server: WebSocketGameServer | None,
+) -> LiveGameSession:
+    """Wire concrete services to the application lifecycle without starting them."""
+    clock = GameClockService(game_service, file_manager)
+    streamer = GameEventStreamer(game_service, poll_interval, ws_server)
+    services = [
+        ServiceLifecycle("clock", clock.start, lambda _game_id: clock.stop()),
+    ]
+    if ws_server is not None:
+        # Bind a non-optional server reference for the lifetime of this session.
+        server = ws_server
+
+        async def start_websocket(_game_id: int, _duration: int) -> asyncio.Task[None]:
+            return asyncio.create_task(server.start())
+
+        services.append(
+            ServiceLifecycle("websocket", start_websocket, lambda _game_id: server.stop())
+        )
+    services.append(
+        ServiceLifecycle(
+            "monitor",
+            lambda game_id, _duration: streamer.start_monitoring(game_id),
+            streamer.stop_monitoring,
+        )
+    )
+    return LiveGameSession(services)
+
+
 async def main():
-    """Main entry point with dependency injection"""
-    # Load configuration
+    """Compose dependencies, execute the CLI, and release infrastructure resources."""
     settings = Settings()
     config = APIConfig()
-    # Initialize infrastructure
     api_client = APIClientPool(
         base_url=config.api_default_url,
         max_connections=settings.max_connections,
         cache_ttl=settings.cache_ttl,
     )
-
-    file_manager = AsyncFileManager(base_path=settings.output_path)
-
-    # Initialize WebSocket server if enabled
-    ws_server = None
-    event_streamer = None
-
-    if settings.enable_websocket:
-        ws_server = WebSocketGameServer(host=settings.websocket_host, port=settings.websocket_port)
-        event_streamer = GameEventStreamer(
-            api_client=api_client, ws_server=ws_server, polling_interval=settings.poll_interval
-        )
-
-    # Initialize application services
-    game_service = GameService(
-        api_client=api_client,
-        file_manager=file_manager,
-        ws_server=ws_server,
-        event_streamer=event_streamer,
-    )
-
-    # Handle CLI
-    cli_handler = CLIHandler(game_service=game_service, settings=settings)
-
     try:
+        file_manager = AsyncFileManager(base_path=settings.output_path)
+        game_service = GameService(api_client=api_client, file_manager=file_manager)
+        ws_server = None
+        if settings.enable_websocket:
+            ws_server = WebSocketGameServer(
+                host=settings.websocket_host, port=settings.websocket_port
+            )
+        live_session = create_live_session(
+            game_service, file_manager, settings.poll_interval, ws_server
+        )
+        cli_handler = CLIHandler(game_service, live_session, settings)
         await cli_handler.handle()
     finally:
         await api_client.close()
-        if ws_server:
-            await ws_server.stop()
 
 
 if __name__ == "__main__":

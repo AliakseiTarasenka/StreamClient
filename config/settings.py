@@ -3,7 +3,8 @@ Configuration management using environment variables
 """
 
 from pathlib import Path
-from pydantic_settings import BaseSettings
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -30,8 +31,9 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_format: str = "json"  # json or text
 
-    class Config:
-        env_file = Path(__file__).resolve().parent.parent / ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False  # APP_NAME, app_name, or App_Name all map to the same variable
-        extra = "allow"
+    model_config = SettingsConfigDict(
+        env_file=Path(__file__).resolve().parent.parent / ".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="allow",
+    )
