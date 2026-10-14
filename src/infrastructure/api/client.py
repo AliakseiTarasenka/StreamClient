@@ -11,7 +11,7 @@ class CacheManager:
     """Simple in-memory cache with TTL"""
 
     def __init__(self, ttl_seconds: int = 5):
-        self.cache = {}
+        self.cache: dict[str, tuple[str, datetime]] = {}
         self.ttl = timedelta(seconds=ttl_seconds)
 
     def get(self, key: str) -> Optional[str]:

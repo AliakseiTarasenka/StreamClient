@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 from src.domain.models.game_event import GameEvent
 
@@ -17,13 +17,14 @@ class GameState:
     home_team_abbr: str = ""
     away_team_name: str = ""
     away_team_abbr: str = ""
-    home_players: dict = None
-    away_players: dict = None
-    events: list[GameEvent] = None
-    latest_scorer: str = ""
-    latest_assist: str = ""
+    home_players: dict[str, str] = field(default_factory=dict)
+    away_players: dict[str, str] = field(default_factory=dict)
+    events: list[GameEvent] = field(default_factory=list)
+    latest_scorer: str | None = ""
+    latest_assist: str | None = ""
 
     def __post_init__(self):
+        """Preserve normalization of explicit None values from untyped callers."""
         if self.home_players is None:
             self.home_players = {}
         if self.away_players is None:

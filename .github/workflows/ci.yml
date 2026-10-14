@@ -17,8 +17,8 @@ jobs:
 
     - name: Install dependencies
       run: |
-        pip install pylint black mypy
-        pip install -r requirements.txt
+        python -m pip install -r requirements.txt
+        python -m pip check
 
     - name: Black (formatting)
       run: black --check --line-length 100 src/ tests/ config/ main.py
@@ -30,7 +30,7 @@ jobs:
       run: pylint src/ config/ main.py --rcfile=.pylintrc
 
     - name: MyPy (types)
-      run: mypy src/ config/ main.py --ignore-missing-imports
+      run: python -m mypy src/ config/ main.py --ignore-missing-imports
 
   test:
     name: Tests
@@ -44,8 +44,8 @@ jobs:
 
     - name: Install dependencies
       run: |
-        pip install -r requirements.txt
-        pip install pytest pytest-asyncio pytest-cov
+        python -m pip install -r requirements.txt pytest-asyncio
+        python -m pip check
 
     - name: Run tests
       run: pytest tests/ -v --cov=src --cov-report=xml

@@ -16,7 +16,7 @@ class GameEventStreamer:
         self,
         game_service: GameService,
         polling_interval: int = 2,
-        ws_server: WebSocketGameServer = None,
+        ws_server: WebSocketGameServer | None = None,
     ):
         self.game_service = game_service
         self.polling_interval = polling_interval

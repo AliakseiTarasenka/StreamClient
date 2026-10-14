@@ -20,6 +20,8 @@ dependencies = [
 dev = [
     "black>=25.9.0",
     "flake8>=7.4.1",
+    "mypy==2.4.0",
+    "pathspec==1.1.1",
     "pre-commit>=4.7.0",
     "pylint>=3.3.9",
     "pytest>=8.4.2",
