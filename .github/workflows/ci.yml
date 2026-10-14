@@ -17,14 +17,14 @@ jobs:
 
     - name: Install dependencies
       run: |
-        pip install pylint black flake8 mypy
+        pip install pylint black mypy
         pip install -r requirements.txt
 
     - name: Black (formatting)
       run: black --check --line-length 100 src/ tests/ config/ main.py
 
-    - name: Flake8 (style)
-      run: flake8 src/ tests/ config/ main.py --max-line-length=100
+    - name: Pre-commit (Flake8)
+      run: pre-commit run --all-files --show-diff-on-failure
 
     - name: Pylint (quality)
       run: pylint src/ config/ main.py --rcfile=.pylintrc
