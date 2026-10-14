@@ -6,7 +6,7 @@ The application uses asyncio, HTTPX, Pydantic Settings, aiofiles, and websockets
 
 ## Current status
 
-Schedule retrieval and a single game query are implemented. Parsing and file output were checked with a synthetic API response during the project review. Live startup cleanup (R1) and the WebSocket connection API defect (R3) are fixed and covered by regression tests. Other live-mode findings remain in the [review report](docs/review.md), including long-running task supervision and scoring-event serialization.
+Schedule retrieval, game queries, and continuous file-only monitoring are implemented. Startup cleanup (R1), WebSocket connection compatibility (R3), and live-task supervision (R4) are fixed and covered by regression tests. Remaining findings in the [review report](docs/review.md) include scoring-event serialization and broadcast retry behavior.
 
 ## Setup
 
@@ -57,11 +57,13 @@ Replace the example date and game ID with values for your event. A schedule quer
 ### Live monitoring
 
 ```bash
-# Intended live mode; currently affected by the documented defects.
+# Continuously update overlay files and the countdown clock.
 python main.py --game 12345 --start
 ```
 
-Set `ENABLE_WEBSOCKET=true` to request a WebSocket server at `ws://localhost:8765`. The CLI uses the declared polling setting and cleans up tasks if initialization fails (R1); the connection API fix (R3) supports broadcast delivery. Long-running task supervision and scoring-event serialization still need the fixes described in the [review report](docs/review.md).
+Live mode stays active until cancellation, a service finishes, or a service fails. Clock errors and exhausted polling retries terminate the session and propagate the error after cleanup. Press Ctrl+C to stop file-only monitoring.
+
+Set `ENABLE_WEBSOCKET=true` to also start a WebSocket server at `ws://localhost:8765`; its normal shutdown stops the clock and polling too. Scoring-event serialization (R2), broadcast retries (R6), and overlay snapshot persistence with WebSocket enabled (R7) still need the fixes described in the [review report](docs/review.md).
 
 The example browser UI is [client/ws-client.html](client/ws-client.html). Once the live-mode defects are resolved and the server is running, open it in a browser, enter the monitored game ID, and click **Fetch Game**. The JavaScript connects to a hardcoded `ws://localhost:8765`; entering a game ID sends a subscription acknowledgment request and does not start API monitoring for that game.
 
@@ -86,9 +88,10 @@ A single `--game` query writes ten files, excluding `clock.txt`. WebSocket monit
 python -m pytest tests/ -v --cov=src
 ```
 
-The suite includes three loopback WebSocket tests, four CLI startup/cleanup cases, and two original `assert True` placeholders. The regressions cover broadcasts, closed connections, send errors, initialization failures, and cancellation. Passing the suite does not validate the full live-mode workflow.
+The suite has 27 cases covering CLI routing, lifecycle contracts, resource cleanup, repeated overlay snapshots, runtime failures, and WebSocket shutdown. Scoring-event delivery and the remote API still need further validation.
 
 - [Architecture and execution flow](docs/architecture.md)
+- [SOLID design and service lifecycle: startup, shutdown, wait, and gather](docs/lifecycle.md)
 - [Environment configuration](docs/configuration.md)
 - [Upstream API and WebSocket protocol](docs/protocols.md)
 - [Development workflow and verification](docs/development.md)

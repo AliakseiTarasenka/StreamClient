@@ -1,24 +1,27 @@
 import argparse
-import asyncio
-from src.application.services.game_service import GameService
-from src.application.services.game_clock_service import GameClockService
-from src.infrastructure.websocket.server import WebSocketGameServer
-from src.infrastructure.websocket.streamer import GameEventStreamer
+from collections.abc import Callable, Sequence
+
 from config.settings import Settings
+from src.application.ports import GameQueries, LiveSession
 
 
 class CLIHandler:
-    """Handles CLI argument parsing and execution"""
+    """Parse commands and display results; delegate game and lifecycle operations."""
 
     def __init__(
-        self, game_service: GameService, ws_server: WebSocketGameServer, settings: Settings
+        self,
+        game_service: GameQueries,
+        live_session: LiveSession,
+        settings: Settings,
+        output: Callable[[str], None] = print,
     ):
         self.game_service = game_service
-        self.ws_server = ws_server
+        self.live_session = live_session
         self.settings = settings
+        self.output = output
 
     @staticmethod
-    def parse_arguments() -> argparse.Namespace:
+    def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
         """Parse command-line arguments"""
         parser = argparse.ArgumentParser(
             description="Ultimate Frisbee Game Information API Client",
@@ -41,15 +44,15 @@ Examples:
             "--start", action="store_true", help="Start timer and process game events"
         )
 
-        return parser.parse_args()
+        return parser.parse_args(argv)
 
-    async def handle(self):
+    async def handle(self, argv: Sequence[str] | None = None):
         """Handle CLI execution"""
-        args = self.parse_arguments()
+        args = self.parse_arguments(argv)
 
         # Determine game duration based on settings
         duration = self.settings.game_duration
-        print(f"Using Game duration: {duration} minutes")
+        self.output(f"Using Game duration: {duration} minutes")
 
         try:
             if args.start and args.game:
@@ -59,64 +62,28 @@ Examples:
             elif args.date:
                 await self._handle_schedule_query(args.date)
             else:
-                print("Error: Please specify either --game or --date")
+                self.output("Error: Please specify either --game or --date")
                 return
         except KeyboardInterrupt:
-            print("\nOperation cancelled by user")
+            self.output("\nOperation cancelled by user")
         except Exception as e:
-            print(f"Error: {e}")
+            self.output(f"Error: {e}")
             raise
 
     async def _handle_schedule_query(self, date: str):
-        print(f"Fetching schedule for {date}:")
+        self.output(f"Fetching schedule for {date}:")
         result = await self.game_service.get_game_schedule(date)
-        print(result)
+        self.output(result)
 
     async def _handle_game_query(self, game_id: int):
-        print(f"Fetching game {game_id}:")
+        self.output(f"Fetching game {game_id}:")
         result = await self.game_service.get_game_events_with_persistence(game_id)
-        print(str(result))
+        self.output(str(result))
 
     async def _handle_start_mode(self, game_id: int, duration: int):
-        """Start WebSocket + game monitoring + clock"""
-        clock_service = GameClockService(self.game_service, self.game_service.file_writer)
-        tasks = []
-        ws_task = None
-        stream = None
-
-        try:
-            clock_task = asyncio.create_task(clock_service.start(game_id, duration))
-            tasks.append(clock_task)
-
-            if not self.ws_server:
-                print("WebSocket support not enabled. Set ENABLE_WEBSOCKET=true in .env")
-            else:
-                ws_task = asyncio.create_task(self.ws_server.start())
-                tasks.append(ws_task)
-
-            stream = GameEventStreamer(
-                self.game_service, self.settings.poll_interval, self.ws_server
-            )
-            monitor_task = asyncio.create_task(stream.start_monitoring(game_id))
-            tasks.append(monitor_task)
-            print(f"Starting game {game_id} with {duration}-minute clock...")
-
-            # Run all tasks concurrently; exceptions are captured individually
-            await asyncio.gather(*tasks, return_exceptions=True)
-        except KeyboardInterrupt:
-            print("\nKeyboardInterrupt received. Stopping all services...")
-        finally:
-            # Cancel all running tasks safely
-            for task in tasks:
-                if not task.done():
-                    task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-
-            # Call explicit stop methods for services
-            if stream is not None:
-                await stream.stop_monitoring(game_id)
-            if ws_task is not None:
-                await self.ws_server.stop()
-            await clock_service.stop()
-
-            print("Shutdown complete.")
+        """Delegate the entire live lifecycle to the injected application service."""
+        if not self.settings.enable_websocket:
+            self.output("WebSocket support not enabled. Set ENABLE_WEBSOCKET=true in .env")
+        self.output(f"Starting game {game_id} with {duration}-minute clock...")
+        await self.live_session.run(game_id, duration)
+        self.output("Shutdown complete.")

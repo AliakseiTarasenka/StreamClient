@@ -25,37 +25,32 @@ class GameEventStreamer:
         self._tasks: dict = {}
         self._last_states: dict = {}
 
-    async def start_monitoring(self, game_id: int):
-        """Start monitoring a game"""
+    async def start_monitoring(self, game_id: int) -> asyncio.Task:
+        """Start monitoring and return the polling task for supervision."""
         if game_id in self.active_games:
             print(f"Already monitoring game {game_id}")
-            return
+            return self._tasks[game_id]
 
         self.active_games.add(game_id)
         task = asyncio.create_task(self._poll_game(game_id))
         self._tasks[game_id] = task
         print(f"Started monitoring game {game_id}")
+        return task
 
     async def stop_monitoring(self, game_id: int):
         """Stop monitoring a game"""
-        if game_id not in self.active_games:
+        task = self._tasks.pop(game_id, None)
+        if game_id not in self.active_games and task is None:
             return
 
         self.active_games.discard(game_id)
 
-        # Cancel the polling task
-        if game_id in self._tasks:
-            task = self._tasks[game_id]
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-            del self._tasks[game_id]
-
-        # Clear cached state
-        if game_id in self._last_states:
-            del self._last_states[game_id]
+        self._last_states.pop(game_id, None)
+        if task is not None:
+            if not task.done():
+                task.cancel()
+            # Terminal polling failures are reported by the task's supervisor.
+            await asyncio.gather(task, return_exceptions=True)
 
         print(f"Stopped monitoring game {game_id}")
 
@@ -77,17 +72,18 @@ class GameEventStreamer:
 
             except asyncio.CancelledError:
                 print(f"Polling cancelled for game {game_id}")
-                break
+                self.active_games.discard(game_id)
+                raise
             except Exception as e:
                 error_count += 1
                 print(f"Error polling game {game_id} (attempt {error_count}/{max_errors}): {e}")
 
                 if error_count >= max_errors:
                     print(f"Max errors reached for game {game_id}, stopping monitor")
-                    await self.stop_monitoring(game_id)
-                    break
+                    self.active_games.discard(game_id)
+                    raise
 
-                # Exponential backoff
+                # Increase the delay after each failed fetch.
                 await asyncio.sleep(self.polling_interval * (error_count + 1))
 
     async def _fetch_game_state(self, game_id: int):
@@ -129,6 +125,6 @@ class GameEventStreamer:
 
     async def stop_all(self):
         """Stop monitoring all games"""
-        games = list(self.active_games)
+        games = list(self._tasks)
         for game_id in games:
             await self.stop_monitoring(game_id)
