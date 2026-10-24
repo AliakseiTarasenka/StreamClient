@@ -53,6 +53,8 @@ updates over WebSocket. Run commands from the repository root.
 These rules apply repository-wide. Review the changed behavior and its callers,
 using the architecture, lifecycle, and protocol guides below as context. Verify
 historical findings in `docs/review.md` against the current implementation.
+For security-sensitive changes, also apply the trust boundaries, review checks,
+and reporting guidance in [SECURITY.md](SECURITY.md).
 
 ### Findings and evidence
 
@@ -145,6 +147,7 @@ verification. Report the checks actually run and any failures or limits.
 - [Service lifecycle and cancellation contracts](docs/lifecycle.md)
 - [API and WebSocket protocol](docs/protocols.md)
 - [Configuration](docs/configuration.md)
+- [Security review guidelines](SECURITY.md)
 - [Development workflow](docs/development.md)
 - [Review findings](docs/review.md): verify findings against current code; this
   report includes resolved historical issues.
