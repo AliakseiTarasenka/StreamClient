@@ -1,32 +1,32 @@
-"""
-Polls API and streams updates via WebSocket
-"""
+"""Poll snapshots, persist overlays, and optionally publish game updates."""
 
 import asyncio
-from typing import Set
 
-from src.application.services.game_service import GameService
-from src.infrastructure.websocket.server import WebSocketGameServer
+from src.application.ports import GameSnapshots, GameUpdatePublisher
+from src.domain.models.game_state import GameState
 
 
 class GameEventStreamer:
-    """Polls API and pushes updates via WebSocket"""
+    """Supervised polling with independent persistence and delivery checkpoints."""
+
+    MAX_ERRORS = 5
 
     def __init__(
         self,
-        game_service: GameService,
-        polling_interval: int = 2,
-        ws_server: WebSocketGameServer | None = None,
+        game_service: GameSnapshots,
+        polling_interval: float = 2,
+        ws_server: GameUpdatePublisher | None = None,
     ):
         self.game_service = game_service
         self.polling_interval = polling_interval
         self.ws_server = ws_server
-        self.active_games: Set[int] = set()
-        self._tasks: dict = {}
-        self._last_states: dict = {}
+        self.active_games: set[int] = set()
+        self._tasks: dict[int, asyncio.Task[None]] = {}
+        self._persisted_states: dict[int, GameState] = {}
+        self._delivered_states: dict[int, GameState] = {}
 
-    async def start_monitoring(self, game_id: int) -> asyncio.Task:
-        """Start monitoring and return the polling task for supervision."""
+    async def start_monitoring(self, game_id: int) -> asyncio.Task[None]:
+        """Start monitoring and return the actual polling task for supervision."""
         if game_id in self.active_games:
             print(f"Already monitoring game {game_id}")
             return self._tasks[game_id]
@@ -37,94 +37,82 @@ class GameEventStreamer:
         print(f"Started monitoring game {game_id}")
         return task
 
-    async def stop_monitoring(self, game_id: int):
-        """Stop monitoring a game"""
+    async def stop_monitoring(self, game_id: int) -> None:
+        """Cancel and await the polling task, then clear its checkpoints."""
         task = self._tasks.pop(game_id, None)
-        if game_id not in self.active_games and task is None:
-            return
-
         self.active_games.discard(game_id)
-
-        self._last_states.pop(game_id, None)
         if task is not None:
             if not task.done():
                 task.cancel()
-            # Terminal polling failures are reported by the task's supervisor.
+            # The live supervisor owns reporting the task's terminal failure.
             await asyncio.gather(task, return_exceptions=True)
-
+        self._persisted_states.pop(game_id, None)
+        self._delivered_states.pop(game_id, None)
         print(f"Stopped monitoring game {game_id}")
 
-    async def _poll_game(self, game_id: int):
-        """Poll game updates and broadcast via WebSocket"""
-        error_count = 0
-        max_errors = 5
-
-        while game_id in self.active_games:
-            try:
-                # Fetch current game state
-                current_state = await self._fetch_game_state(game_id)
-                last_state = self._last_states.get(game_id)
-
-                if current_state != last_state:
-                    await self._handle_state_change(game_id, current_state)
-                    error_count = 0
-                await asyncio.sleep(self.polling_interval)
-
-            except asyncio.CancelledError:
-                print(f"Polling cancelled for game {game_id}")
-                self.active_games.discard(game_id)
-                raise
-            except Exception as e:
-                error_count += 1
-                print(f"Error polling game {game_id} (attempt {error_count}/{max_errors}): {e}")
-
-                if error_count >= max_errors:
-                    print(f"Max errors reached for game {game_id}, stopping monitor")
-                    self.active_games.discard(game_id)
-                    raise
-
-                # Increase the delay after each failed fetch.
-                await asyncio.sleep(self.polling_interval * (error_count + 1))
-
-    async def _fetch_game_state(self, game_id: int):
-        """
-        Fetch the latest game state.
-        Use lightweight fetch if WebSocket is active, otherwise persist to file.
-        """
-        if self.ws_server:
-            return await self.game_service.get_game_events(game_id)
-        return await self.game_service.get_game_events_with_persistence(game_id)
-
-    async def _handle_state_change(self, game_id: int, current_state):
-        """Handle and persist/broadcast game state changes."""
+    async def _poll_game(self, game_id: int) -> None:
+        """Retry each failed stage without treating another stage as its success."""
+        errors = {"fetch": 0, "persistence": 0, "delivery": 0}
         try:
-            # Persist first
-            if hasattr(self.game_service, "persist_game_state"):
-                await self.game_service.persist_game_state(game_id, current_state)
-                print(f"[SAVE] Game {game_id} state persisted.")
+            while game_id in self.active_games:
+                try:
+                    current_state = await self.game_service.get_game_events(game_id)
+                except Exception as error:
+                    errors["fetch"] += 1
+                    await self._retry(game_id, "fetch", errors["fetch"], error)
+                    continue
+                # An unchanged response is still a successful fetch.
+                errors["fetch"] = 0
 
-            # Then broadcast if WebSocket enabled
-            if self.ws_server:
-                await self.ws_server.broadcast_game_update(game_id, current_state.to_dict())
-                print(f"[WS] Broadcasted update for game {game_id}")
-            else:
-                print(f"[INFO] WebSocket not enabled for game {game_id}")
+                try:
+                    # Keep file-only mode's historical rewrite-on-every-poll behavior.
+                    if self.ws_server is None or current_state != self._persisted_states.get(
+                        game_id
+                    ):
+                        await self.game_service.persist_game_state(current_state)
+                        self._persisted_states[game_id] = current_state
+                except Exception as error:
+                    # A partial write may have replaced the previous good snapshot.
+                    self._persisted_states.pop(game_id, None)
+                    errors["persistence"] += 1
+                    await self._retry(game_id, "persistence", errors["persistence"], error)
+                    continue
+                errors["persistence"] = 0
 
-        except Exception as e:
-            print(f"[WARN] Failed to handle game {game_id}: {e}")
+                try:
+                    if self.ws_server is not None and current_state != self._delivered_states.get(
+                        game_id
+                    ):
+                        await self.ws_server.broadcast_game_update(game_id, current_state.to_dict())
+                        self._delivered_states[game_id] = current_state
+                except Exception as error:
+                    # Some clients or the server cache may have received this state.
+                    self._delivered_states.pop(game_id, None)
+                    errors["delivery"] += 1
+                    await self._retry(game_id, "delivery", errors["delivery"], error)
+                    continue
+                errors["delivery"] = 0
+                await asyncio.sleep(self.polling_interval)
+        finally:
+            # Cancellation and exhausted retries both reach the supervising task.
+            self.active_games.discard(game_id)
 
-        self._last_states[game_id] = current_state
+    async def _retry(self, game_id: int, operation: str, count: int, error: Exception) -> None:
+        """Back off after a failed stage or propagate its original terminal error."""
+        print(f"Error during {operation} for game {game_id} ({count}/{self.MAX_ERRORS}): {error}")
+        if count >= self.MAX_ERRORS:
+            raise error
+        await asyncio.sleep(self.polling_interval * (count + 1))
 
-    def get_monitored_games(self) -> list:
-        """Get list of currently monitored games"""
+    def get_monitored_games(self) -> list[int]:
+        """Get the currently monitored games."""
         return list(self.active_games)
 
     def is_monitoring(self, game_id: int) -> bool:
-        """Check if a game is being monitored"""
+        """Check whether a game's polling loop is active."""
         return game_id in self.active_games
 
-    async def stop_all(self):
-        """Stop monitoring all games"""
-        games = list(self._tasks)
-        for game_id in games:
+    async def stop_all(self) -> None:
+        """Stop every registered polling task, including already failed tasks."""
+        for game_id in list(self._tasks):
             await self.stop_monitoring(game_id)

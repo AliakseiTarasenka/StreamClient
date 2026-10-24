@@ -51,7 +51,7 @@ class GameState:
                 "home": self.home_players,
                 "away": self.away_players,
             },
-            "events": self.events,
+            "events": [event.to_dict() for event in self.events],
             "latest_scorer": self.latest_scorer,
             "latest_assist": self.latest_assist,
         }

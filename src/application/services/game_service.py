@@ -5,43 +5,43 @@ High-level game service orchestrating business logic
 import asyncio
 import math
 import time
-from src.infrastructure.api.client import APIClientPool
-from src.infrastructure.persistence.async_file_manager import AsyncFileManager
+from src.application.commands.persist_game_state import PersistGameState
+from src.application.commands.process_game import ProcessGameEvents, ProcessGameSchedule
+from src.application.ports import GameAPI, OverlayWriter
 from src.domain.models.game_state import GameState
 
 
 class GameService:
     """High-level service for game operations"""
 
-    def __init__(self, api_client: APIClientPool, file_manager: AsyncFileManager):
+    def __init__(self, api_client: GameAPI, file_manager: OverlayWriter):
         self.api_client = api_client
         self.file_writer = file_manager
+        self._persistence = PersistGameState(file_manager)
 
     async def get_game_schedule(self, date: str) -> str:
         """Get game schedule for a specific date"""
-        from src.application.commands.process_game import ProcessGameSchedule
-
         command = ProcessGameSchedule(self.api_client)
         data = {"schedule": date, "date": date}
         return await command.execute(data)
 
     async def get_game_events(self, game_id: int) -> GameState:
         """Get game events for a specific game"""
-        from src.application.commands.process_game import ProcessGameEvents
-
         command = ProcessGameEvents(self.api_client)
         data = {"game": game_id, "update": "true", "players": "true", "teams": "true"}
         return await command.execute(data)
 
     async def get_game_events_with_persistence(self, game_id: int) -> GameState:
         """Get game events and persist to files"""
-        from src.application.commands.process_game import ProcessGameEventsWithPersistence
+        game_state = await self.get_game_events(game_id)
+        await self.persist_game_state(game_state)
+        return game_state
 
-        command = ProcessGameEventsWithPersistence(self.api_client, self.file_writer)
-        data = {"game": game_id, "update": "true", "players": "true", "teams": "true"}
-        return await command.execute(data)
+    async def persist_game_state(self, game_state: GameState) -> None:
+        """Persist an already fetched snapshot without making another API request."""
+        await self._persistence.execute(game_state)
 
-    async def run_game_clock(self, game_id: int, duration_minutes: int):
+    async def run_game_clock(self, game_id: int, duration_minutes: int) -> None:
         """Run game clock with countdown and file updates"""
         total_seconds = duration_minutes * 60
         game_time = 0
