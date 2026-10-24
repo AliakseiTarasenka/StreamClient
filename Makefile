@@ -14,7 +14,12 @@ test-live:
 	pytest -v -W error \
 		tests/unit/test_live_session.py \
 		tests/unit/test_main.py \
+		tests/unit/test_signals.py \
+		tests/unit/test_game_clock.py \
+		tests/unit/test_streamer.py \
+		tests/integration/test_integration.py \
 		tests/integration/test_live_mode.py \
+		tests/integration/test_live_outputs.py \
 		tests/integration/test_websocket_server.py
 
 format:

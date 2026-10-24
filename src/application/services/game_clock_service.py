@@ -1,12 +1,11 @@
 import asyncio
-from src.application.services.game_service import GameService
-from src.infrastructure.persistence.async_file_manager import AsyncFileManager
+from src.application.ports import GameClock, OverlayWriter
 
 
 class GameClockService:
     """Separate service for game clock management"""
 
-    def __init__(self, game_service: GameService, file_manager: AsyncFileManager):
+    def __init__(self, game_service: GameClock, file_manager: OverlayWriter):
         self.game_service = game_service
         self.file_manager = file_manager
         self._running = False

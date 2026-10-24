@@ -10,7 +10,6 @@ import pytest
 from config.settings import Settings
 from main import create_live_session
 from src.application.services.game_service import GameService
-from src.domain.models.game_state import GameState
 from src.infrastructure.persistence.async_file_manager import AsyncFileManager
 from src.infrastructure.websocket.server import WebSocketGameServer
 
@@ -40,9 +39,11 @@ def test_file_only_mode_keeps_polling_and_updates_overlay_files(tmp_path):
 
         api = SimpleNamespace(post=response)
         service = GameService(api, AsyncFileManager(tmp_path))
-        service.get_game_events = AsyncMock(return_value=GameState(12345))
         settings = Settings(_env_file=None, poll_interval=0)
         session = create_live_session(service, service.file_writer, settings.poll_interval, None)
+        # Keep the real clock away from its five-second API refresh boundary.
+        clock_time = patch("src.application.services.game_service.time.time", return_value=1)
+        clock_time.start()
         task = asyncio.create_task(session.run(12345, 25))
         try:
             await third_snapshot.wait()
@@ -56,6 +57,7 @@ def test_file_only_mode_keeps_polling_and_updates_overlay_files(tmp_path):
             assert asyncio.all_tasks() <= initial_tasks
         finally:
             await cancel_task(task)
+            clock_time.stop()
 
     asyncio.run(asyncio.wait_for(scenario(), timeout=5))
 
@@ -170,24 +172,20 @@ def test_normal_websocket_shutdown_stops_clock_and_polling():
         websocket = WebSocketGameServer("127.0.0.1", 0)
         service = SimpleNamespace(file_writer=object(), run_game_clock=clock, get_game_events=fetch)
         session = create_live_session(service, service.file_writer, 2, websocket)
-        loop = asyncio.get_running_loop()
-        # Capture the registered shutdown callback without replacing process signal handlers.
-        with patch.object(loop, "add_signal_handler") as register:
-            task = asyncio.create_task(session.run(12345, 25))
-            try:
-                await clock_started.wait()
-                await polling_started.wait()
-                # start() registers handlers after binding the socket; wait for registration.
-                while not register.called:
-                    await asyncio.sleep(0)
-                register.call_args.args[1]()
-                await task
-                assert clock_stopped.is_set()
-                assert polling_stopped.is_set()
-                assert not websocket._running
-                assert not websocket._server.is_serving()
-                assert asyncio.all_tasks() <= initial_tasks
-            finally:
-                await cancel_task(task)
+        task = asyncio.create_task(session.run(12345, 25))
+        try:
+            await clock_started.wait()
+            await polling_started.wait()
+            while websocket._server is None or not websocket._server.is_serving():
+                await asyncio.sleep(0)
+            websocket.request_shutdown()
+            await task
+            assert clock_stopped.is_set()
+            assert polling_stopped.is_set()
+            assert not websocket._running
+            assert not websocket._server.is_serving()
+            assert asyncio.all_tasks() <= initial_tasks
+        finally:
+            await cancel_task(task)
 
     asyncio.run(asyncio.wait_for(scenario(), timeout=5))

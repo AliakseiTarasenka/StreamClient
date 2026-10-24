@@ -1,23 +1,34 @@
 import asyncio
 import json
-import signal
-from websockets.asyncio.server import ServerConnection, serve
+
+from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
 
 class WebSocketGameServer:
-    """Async WebSocket server for broadcasting game updates."""
+    """Transport for game subscriptions, ordered snapshots, and live updates."""
 
-    def __init__(self, host: str = "localhost", port: int = 8765):
+    def __init__(self, host: str = "localhost", port: int = 8765, *, send_timeout: float = 5):
         self.host = host
         self.port = port
+        self._send_timeout = send_timeout
         self._running = False
-        self._server = None
+        self._server: Server | None = None
         self._clients: set[ServerConnection] = set()
+        self._subscriptions: dict[ServerConnection, int] = {}
+        self._snapshots: dict[int, str] = {}
+        # Subscriptions and broadcasts share an ordering boundary: replay cannot
+        # deliver an old snapshot after a more recent live update.
+        self._delivery_lock = asyncio.Lock()
+        self._stop_lock = asyncio.Lock()
         self._shutdown_event = asyncio.Event()
 
-    async def handle_client(self, websocket: ServerConnection):
-        """Handle new WebSocket client connections."""
+    def _remove_client(self, websocket: ServerConnection) -> None:
+        self._clients.discard(websocket)
+        self._subscriptions.pop(websocket, None)
+
+    async def handle_client(self, websocket: ServerConnection) -> None:
+        """Handle requests until the peer disconnects or the listener closes."""
         self._clients.add(websocket)
         client_addr = websocket.remote_address
         print(f"[WS] Client connected: {client_addr}")
@@ -27,81 +38,115 @@ class WebSocketGameServer:
         except ConnectionClosed:
             print(f"[WS] Client disconnected: {client_addr}")
         finally:
-            self._clients.discard(websocket)
+            self._remove_client(websocket)
 
     @staticmethod
-    async def handle_message(websocket: ServerConnection, message: str | bytes):
-        """Handle incoming message from a client."""
+    def _parse_game_id(value: object) -> int | None:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value if value > 0 else None
+        if isinstance(value, str) and value.isascii() and value.isdecimal():
+            try:
+                game_id = int(value)
+            except ValueError:
+                # Also rejects strings exceeding Python's integer digit limit.
+                return None
+            return game_id if game_id > 0 else None
+        return None
+
+    async def _send(self, websocket: ServerConnection, message: str) -> None:
+        async with asyncio.timeout(self._send_timeout):
+            await websocket.send(message)
+
+    async def handle_message(self, websocket: ServerConnection, message: str | bytes) -> None:
+        """Validate a subscription, acknowledge it, then replay its latest snapshot."""
         try:
             data = json.loads(message)
-        except json.JSONDecodeError:
-            await websocket.send(json.dumps({"error": "Invalid JSON"}))
+        except ValueError:
+            # Includes malformed JSON, invalid UTF-8, and oversized JSON integers.
+            await self._send(websocket, json.dumps({"error": "Invalid JSON"}))
             return
 
-        action = data.get("action")
-        if action == "subscribe":
-            game_id = data.get("game_id")
-            await websocket.send(json.dumps({"status": "subscribed", "game_id": game_id}))
-            print(f"[WS] Client subscribed to game {game_id}")
-        else:
-            await websocket.send(json.dumps({"error": "Unknown action"}))
-
-    async def broadcast_game_update(self, game_id: int, current_state: dict):
-        if not self._clients:
+        if not isinstance(data, dict):
+            await self._send(websocket, json.dumps({"error": "Request must be a JSON object"}))
+            return
+        if data.get("action") != "subscribe":
+            await self._send(websocket, json.dumps({"error": "Unknown action"}))
+            return
+        game_id = self._parse_game_id(data.get("game_id"))
+        if game_id is None:
+            await self._send(websocket, json.dumps({"error": "Invalid game_id"}))
             return
 
-        message = {
-            "type": "game_update",
-            "game_id": game_id,
-            "payload": current_state,
-        }
+        async with self._delivery_lock:
+            await self._send(websocket, json.dumps({"status": "subscribed", "game_id": game_id}))
+            self._subscriptions[websocket] = game_id
+            snapshot = self._snapshots.get(game_id)
+            if snapshot is not None:
+                await self._send(websocket, snapshot)
+        print(f"[WS] Client subscribed to game {game_id}")
 
-        message_str = json.dumps(message)
-        clients = tuple(self._clients)
-        results = await asyncio.gather(
-            *(client.send(message_str) for client in clients),
-            return_exceptions=True,
-        )
-        sent_count = 0
-        for client, result in zip(clients, results):
-            if isinstance(result, ConnectionClosed):
-                self._clients.discard(client)
-            elif isinstance(result, BaseException):
-                raise result
-            else:
-                sent_count += 1
+    async def broadcast_game_update(self, game_id: int, current_state: dict) -> None:
+        """Cache an immutable envelope and attempt delivery to every matching subscriber.
+
+        Closed peers are removed. Other failures propagate after every selected
+        send completes; the polling service owns retries and may duplicate updates.
+        """
+        message = json.dumps({"type": "game_update", "game_id": game_id, "payload": current_state})
+        async with self._delivery_lock:
+            self._snapshots[game_id] = message
+            clients = tuple(
+                client for client in self._clients if self._subscriptions.get(client) == game_id
+            )
+            results = await asyncio.gather(
+                *(self._send(client, message) for client in clients), return_exceptions=True
+            )
+            failure: BaseException | None = None
+            sent_count = 0
+            for client, result in zip(clients, results):
+                if isinstance(result, ConnectionClosed):
+                    self._remove_client(client)
+                elif isinstance(result, BaseException):
+                    failure = failure or result
+                else:
+                    sent_count += 1
+            if failure is not None:
+                raise failure
         print(f"[WS] Broadcasted game {game_id} update to {sent_count} clients")
 
-    async def start(self):
-        """Start the WebSocket server."""
-        self._server = await serve(self.handle_client, self.host, self.port)
-        self._running = True
-        print(f"[WS] Server started on ws://{self.host}:{self.port}")
+    def request_shutdown(self) -> None:
+        """Request normal completion; process signal ownership belongs to the caller."""
+        self._shutdown_event.set()
 
-        # graceful shutdown via signal
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, self._shutdown_event.set)
+    async def start(self) -> None:
+        """Run the listener until shutdown or cancellation, releasing it on every exit."""
+        self._shutdown_event.clear()
+        primary_error: BaseException | None = None
+        try:
+            self._server = await serve(self.handle_client, self.host, self.port)
+            self._running = True
+            print(f"[WS] Server started on ws://{self.host}:{self.port}")
+            await self._shutdown_event.wait()
+        except BaseException as error:
+            primary_error = error
+            raise
+        finally:
+            try:
+                await self.stop()
+            except Exception as error:
+                if primary_error is None:
+                    raise
+                print(f"[WS] Error during shutdown: {error}")
 
-        # block until shutdown triggered
-        await self._shutdown_event.wait()
-        await self.stop()
-
-    async def stop(self):
-        """Stop the WebSocket server gracefully."""
-        if not self._running:
-            return
-
-        print("[WS] Stopping server...")
-        self._running = False
-
-        # Close client connections
-        await asyncio.gather(*(client.close() for client in self._clients), return_exceptions=True)
-        self._clients.clear()
-
-        # Stop the underlying server
-        if self._server is not None:
-            self._server.close()
-            await self._server.wait_closed()
-
-        print("[WS] Server stopped cleanly.")
+    async def stop(self) -> None:
+        """Close the listener and all peers; safe after partial startup or prior cleanup."""
+        async with self._stop_lock:
+            self._shutdown_event.set()
+            self._running = False
+            if self._server is not None:
+                self._server.close()
+                await self._server.wait_closed()
+            self._clients.clear()
+            self._subscriptions.clear()
+            self._snapshots.clear()

@@ -27,7 +27,7 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-On Windows, activate with `.venv\Scripts\Activate.ps1` in PowerShell. The WebSocket server's signal handling currently assumes a Unix event loop.
+On Windows, activate with `.venv\Scripts\Activate.ps1` in PowerShell. Application signal handling uses process handlers and preserves existing host handlers; native Windows execution has not been verified.
 
 Create local configuration only if `.env` does not already exist:
 
@@ -63,9 +63,9 @@ python main.py --game 12345 --start
 
 Live mode stays active until cancellation, a service finishes, or a service fails. Clock errors and exhausted polling retries terminate the session and propagate the error after cleanup. Press Ctrl+C to stop file-only monitoring.
 
-Set `ENABLE_WEBSOCKET=true` to also start a WebSocket server at `ws://localhost:8765`; its normal shutdown stops the clock and polling too. Scoring-event serialization (R2), broadcast retries (R6), and overlay snapshot persistence with WebSocket enabled (R7) still need the fixes described in the [review report](docs/review.md).
+Set `ENABLE_WEBSOCKET=true` to also start a WebSocket server at `ws://localhost:8765`; its normal shutdown stops the clock and polling too. Both live modes maintain overlay files. Scoring events serialize as JSON objects, failed output is retried with bounded budgets, and subscribers receive the latest published snapshot. See the [implementation report](docs/review.md) for behavior and limits.
 
-The example browser UI is [client/ws-client.html](client/ws-client.html). Once the live-mode defects are resolved and the server is running, open it in a browser, enter the monitored game ID, and click **Fetch Game**. The JavaScript connects to a hardcoded `ws://localhost:8765`; entering a game ID sends a subscription acknowledgment request and does not start API monitoring for that game.
+The example browser UI is [client/ws-client.html](client/ws-client.html). With the server running, open it in a browser, enter the monitored game ID, and click **Fetch Game**. The JavaScript connects to a hardcoded `ws://localhost:8765`. A subscription selects that game's updates and immediately replays its latest snapshot when available; it does not start API monitoring. The CLI selects the monitored game.
 
 ## Overlay files
 
@@ -80,7 +80,7 @@ The example browser UI is [client/ws-client.html](client/ws-client.html). Once t
 | `scorer.txt`, `assist.txt` | Latest scorer and assister names; a single space if unavailable |
 | `clock.txt` | Remaining time in `MM:SS`, written by the clock task in live mode |
 
-A single `--game` query writes ten files, excluding `clock.txt`. WebSocket monitoring currently skips those ten overlay files; only the separate clock task writes `clock.txt`. Files have fixed names, so multiple games or processes sharing the same output directory overwrite each other's data. Writes are sequential and not atomic; consumers can observe partial updates.
+A single `--game` query writes ten files, excluding `clock.txt`. Both live modes maintain those ten files and the separate clock maintains `clock.txt`. File-only mode rewrites every successful poll; WebSocket mode writes changed or failed/pending snapshots. Files have fixed names, so multiple games or processes sharing the same output directory overwrite each other's data. Writes are sequential and not atomic; consumers can observe partial updates.
 
 ## Development and documentation
 
@@ -88,7 +88,7 @@ A single `--game` query writes ten files, excluding `clock.txt`. WebSocket monit
 python -m pytest tests/ -v --cov=src
 ```
 
-The suite has 27 cases covering CLI routing, lifecycle contracts, resource cleanup, repeated overlay snapshots, runtime failures, and WebSocket shutdown. Scoring-event delivery and the remote API still need further validation.
+The suite has 95 cases covering CLI routing, lifecycle contracts, signals/resource cleanup, HTTP/cache/TLS behavior, parsing, clock timing, overlay persistence, output retries, and real loopback WebSocket delivery/replay/shutdown. Source coverage is 95%. Remote tournament data and browser interaction have not been independently verified.
 
 - [Architecture and execution flow](docs/architecture.md)
 - [SOLID design and service lifecycle: startup, shutdown, wait, and gather](docs/lifecycle.md)

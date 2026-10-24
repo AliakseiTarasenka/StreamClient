@@ -1,8 +1,10 @@
-import httpx
+import asyncio
 import json
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
 from functools import wraps
+from time import monotonic
+from typing import Optional, Dict, Any
+
+import httpx
 
 from src.infrastructure.api.config import APIConfig
 
@@ -11,19 +13,19 @@ class CacheManager:
     """Simple in-memory cache with TTL"""
 
     def __init__(self, ttl_seconds: int = 5):
-        self.cache: dict[str, tuple[str, datetime]] = {}
-        self.ttl = timedelta(seconds=ttl_seconds)
+        self.cache: dict[str, tuple[str, float]] = {}
+        self.ttl = ttl_seconds
 
     def get(self, key: str) -> Optional[str]:
         if key in self.cache:
             value, timestamp = self.cache[key]
-            if datetime.now() - timestamp < self.ttl:
+            if monotonic() - timestamp < self.ttl:
                 return value
             del self.cache[key]
         return None
 
     def set(self, key: str, value: str) -> None:
-        self.cache[key] = (value, datetime.now())
+        self.cache[key] = (value, monotonic())
 
     def invalidate(self, pattern: Optional[str] = None) -> None:
         if pattern:
@@ -46,6 +48,8 @@ class APIClient:
         headers: Dict[str, Any] | None = None,
         timeout: int = 30,
         max_connections: int = 100,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
     ):
         # Load config if not provided
         config = APIConfig()
@@ -55,9 +59,9 @@ class APIClient:
 
         # init NON-BLOCKING async HTTP client
         self._client = httpx.AsyncClient(
-            verify=False,
             limits=httpx.Limits(max_connections=max_connections, max_keepalive_connections=20),
             timeout=httpx.Timeout(timeout),
+            transport=transport,
         )
 
     async def post(self, data: dict) -> str:
@@ -87,8 +91,12 @@ class APIClientPool(APIClient):
         timeout: int = 30,
         max_connections: int = 100,
         cache_ttl: int = 5,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
     ):
-        super().__init__(base_url, timeout=timeout, max_connections=max_connections)
+        super().__init__(
+            base_url, timeout=timeout, max_connections=max_connections, transport=transport
+        )
         self.cache = CacheManager(ttl_seconds=cache_ttl)
 
     def _make_cache_key(self, data: dict) -> str:
@@ -100,7 +108,7 @@ class APIClientPool(APIClient):
 
         cache_key = self._make_cache_key(data)
         cached = self.cache.get(cache_key)
-        if cached:
+        if cached is not None:
             return cached
 
         result = await super().post(data)
@@ -111,7 +119,7 @@ class APIClientPool(APIClient):
         self.cache.invalidate(pattern)
 
     def get_cache_stats(self) -> dict:
-        return {"size": self.cache.size(), "ttl_seconds": self.cache.ttl.seconds}
+        return {"size": self.cache.size(), "ttl_seconds": self.cache.ttl}
 
     # automatically close Httpx connection and clear cache
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -121,6 +129,8 @@ class APIClientPool(APIClient):
 
 def retry_on_failure(max_attempts: int = 3, delay: int = 1):
     """Retry decorator for async API calls"""
+    if max_attempts < 1:
+        raise ValueError("max_attempts must be at least one")
 
     def decorator(func):
         @wraps(func)
@@ -132,8 +142,6 @@ def retry_on_failure(max_attempts: int = 3, delay: int = 1):
                 except httpx.HTTPError as e:
                     last_exception = e
                     if attempt < max_attempts - 1:
-                        import asyncio
-
                         await asyncio.sleep(delay * (attempt + 1))
             raise last_exception
 
